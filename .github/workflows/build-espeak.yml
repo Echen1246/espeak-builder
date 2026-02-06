@@ -43,6 +43,7 @@ jobs:
 
           # Configure with shared libraries enabled
           # Disable speechPlayer (requires pthread), klatt, and other optional features
+          # Android's Bionic has pthreads built-in, no -lpthread needed
           ./configure --host=$TARGET \
             --with-async=no \
             --with-pcaudiolib=no \
@@ -51,10 +52,17 @@ jobs:
             --with-speechplayer=no \
             --with-klatt=no \
             --enable-shared \
-            --disable-static
+            --disable-static \
+            LIBS="" \
+            PTHREAD_LIBS="" \
+            PTHREAD_CFLAGS=""
 
-          # Build just the library (LDFLAGS to avoid pthread issues)
-          make LDFLAGS="-avoid-version" src/libespeak-ng.la
+          # Patch Makefile to remove -lpthread (Android Bionic doesn't need it)
+          sed -i 's/-lpthread//g' Makefile
+          sed -i 's/-lpthread//g' libtool
+          
+          # Build just the library
+          make src/libespeak-ng.la
 
           # Extract the .so file
           mkdir -p output/jniLibs/arm64-v8a
@@ -87,9 +95,16 @@ jobs:
             --with-speechplayer=no \
             --with-klatt=no \
             --enable-shared \
-            --disable-static
+            --disable-static \
+            LIBS="" \
+            PTHREAD_LIBS="" \
+            PTHREAD_CFLAGS=""
 
-          make LDFLAGS="-avoid-version" src/libespeak-ng.la
+          # Patch Makefile to remove -lpthread
+          sed -i 's/-lpthread//g' Makefile
+          sed -i 's/-lpthread//g' libtool
+          
+          make src/libespeak-ng.la
 
           mkdir -p output/jniLibs/armeabi-v7a
           cp src/.libs/libespeak-ng.so output/jniLibs/armeabi-v7a/
