@@ -1,0 +1,127 @@
+name: Build Espeak-NG for Android
+
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Espeak-NG
+        uses: actions/checkout@v4
+        with:
+          repository: 'espeak-ng/espeak-ng'
+          ref: '1.52.0'  # Use stable release
+          submodules: recursive
+
+      - name: Setup Android NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake libtool pkg-config gperf
+
+      - name: Generate Configure Script
+        run: ./autogen.sh
+
+      - name: Build for ARM64 (arm64-v8a)
+        run: |
+          # Find NDK path
+          export ANDROID_NDK_HOME=$(find $ANDROID_HOME/ndk -maxdepth 1 -type d | tail -1)
+          echo "Using NDK: $ANDROID_NDK_HOME"
+          
+          export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
+          export TARGET=aarch64-linux-android
+          export API=24
+          export AR=$TOOLCHAIN/bin/llvm-ar
+          export CC=$TOOLCHAIN/bin/${TARGET}${API}-clang
+          export AS=$CC
+          export CXX=$TOOLCHAIN/bin/${TARGET}${API}-clang++
+          export LD=$TOOLCHAIN/bin/ld
+          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
+          export STRIP=$TOOLCHAIN/bin/llvm-strip
+
+          # Configure with shared libraries enabled
+          ./configure --host=$TARGET \
+            --with-async=no \
+            --with-pcaudiolib=no \
+            --with-mbrola=no \
+            --with-sonic=no \
+            --enable-shared \
+            --disable-static
+
+          # Build just the library
+          make src/libespeak-ng.la
+
+          # Extract the .so file
+          mkdir -p output/jniLibs/arm64-v8a
+          cp src/.libs/libespeak-ng.so output/jniLibs/arm64-v8a/
+          
+          # Also get version info
+          ls -la output/jniLibs/arm64-v8a/
+
+      - name: Build for ARMv7 (armeabi-v7a)
+        run: |
+          make clean || true
+          
+          export ANDROID_NDK_HOME=$(find $ANDROID_HOME/ndk -maxdepth 1 -type d | tail -1)
+          export TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
+          export TARGET=armv7a-linux-androideabi
+          export API=24
+          export AR=$TOOLCHAIN/bin/llvm-ar
+          export CC=$TOOLCHAIN/bin/${TARGET}${API}-clang
+          export AS=$CC
+          export CXX=$TOOLCHAIN/bin/${TARGET}${API}-clang++
+          export LD=$TOOLCHAIN/bin/ld
+          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
+          export STRIP=$TOOLCHAIN/bin/llvm-strip
+
+          ./configure --host=arm-linux-androideabi \
+            --with-async=no \
+            --with-pcaudiolib=no \
+            --with-mbrola=no \
+            --with-sonic=no \
+            --enable-shared \
+            --disable-static
+
+          make src/libespeak-ng.la
+
+          mkdir -p output/jniLibs/armeabi-v7a
+          cp src/.libs/libespeak-ng.so output/jniLibs/armeabi-v7a/
+          ls -la output/jniLibs/armeabi-v7a/
+
+      - name: Compile espeak-ng-data (using host compiler)
+        run: |
+          make clean || true
+          
+          # Build with host compiler to generate data files
+          ./configure --with-async=no --with-pcaudiolib=no
+          make
+          
+          # Copy the compiled data
+          mkdir -p output/assets
+          cp -r espeak-ng-data output/assets/
+          
+          # Show what we got
+          echo "=== espeak-ng-data contents ==="
+          ls -la output/assets/espeak-ng-data/ | head -20
+          du -sh output/assets/espeak-ng-data/
+
+      - name: Create summary
+        run: |
+          echo "=== Build Summary ===" > output/BUILD_INFO.txt
+          echo "espeak-ng version: 1.52.0" >> output/BUILD_INFO.txt
+          echo "Build date: $(date)" >> output/BUILD_INFO.txt
+          echo "" >> output/BUILD_INFO.txt
+          echo "Libraries built:" >> output/BUILD_INFO.txt
+          ls -la output/jniLibs/*/*.so >> output/BUILD_INFO.txt
+          echo "" >> output/BUILD_INFO.txt
+          echo "Data size:" >> output/BUILD_INFO.txt
+          du -sh output/assets/espeak-ng-data/ >> output/BUILD_INFO.txt
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: espeak-android-build
+          path: output/
+          retention-days: 90
